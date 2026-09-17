@@ -1,0 +1,15 @@
+{
+  "name": "ttaelrae-malrae",
+  "version": "0.1.0",
+  "private": true,
+  "description": "과팅/학팅 매칭 웹앱 (프로토타입)",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "socket.io": "^4.8.3"
+  }
+}
