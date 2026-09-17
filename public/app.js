@@ -239,129 +239,295 @@ window.addEventListener('hashchange', router);
 const back = fallback => `<button class="back" onclick="history.length > 1 ? history.back() : location.hash='${fallback}'">‹</button>`;
 
 // ================= 로그인 / 회원가입 =================
+const DEMO_ACCOUNTS = [
+  ['minji', '민지', '🐰', 'F'], ['sua', '수아', '🐻', 'F'], ['jiwoo', '지우', '🌷', 'F'],
+  ['doyun', '도윤', '🐶', 'M'], ['siwoo', '시우', '🦁', 'M'], ['junho', '준호', '🐯', 'M'],
+];
+const FLOAT_MEMOS = ['오늘 저녁 3:3 🍻', '경영 × 컴공?', '금요일 1:1 ☕', '디자인과 2명!', '보드게임 좋아해요', '신촌에서 만나요'];
+
+function authBackdrop() {
+  return `<div class="auth-bg" aria-hidden="true">${FLOAT_MEMOS.map((t, i) => `<span class="float-memo fm${i}">${t}</span>`).join('')}</div>`;
+}
+
 function renderLogin() {
   const invited = sessionStorage.getItem('pendingInvite');
   $view.innerHTML = `
-    <div class="onboard-hero">
-      <div style="font-size:44px">📝💘</div>
-      <h1>땔래말래</h1>
-      <p>캘린더에 가능한 날을 붙여두면<br/>마음에 드는 팀이 메모를 떼가요.</p>
-    </div>
-    <form class="pad" id="login" style="padding-top:28px">
-      ${invited ? `<div class="card center small" style="margin:0 0 16px">👯 팀 초대를 받았어요! 로그인하면 바로 합류할 수 있어요</div>` : ''}
-      <div class="field"><label>아이디</label><input class="input" name="loginId" autocomplete="username" autocapitalize="off" /></div>
-      <div class="field"><label>비밀번호</label><input class="input" name="password" type="password" autocomplete="current-password" /></div>
-      <button class="btn primary block">로그인</button>
-      <p class="center small muted" style="margin-top:20px">처음이신가요? <a href="#/signup" style="color:var(--accent);font-weight:700">회원가입</a></p>
-    </form>`;
-  $view.querySelector('#login').onsubmit = async e => {
-    e.preventDefault();
-    const f = new FormData(e.target);
-    try { onAuthed(await api('POST', '/api/auth/login', { loginId: f.get('loginId'), password: f.get('password') })); }
-    catch (err) { toast(err.message); }
+    <div class="auth">
+      ${authBackdrop()}
+      <div class="auth-hero">
+        <div class="auth-logo">📝<i>💘</i></div>
+        <h1>땔래말래</h1>
+        <p>가능한 날짜에 메모를 붙이고<br/>끌리는 메모는 떼가세요</p>
+      </div>
+      <form class="auth-card" id="login" novalidate>
+        ${invited ? `<div class="auth-notice">👯 팀 초대를 받았어요! 로그인하면 바로 합류할 수 있어요</div>` : ''}
+        <label class="ifield"><span class="ic">👤</span>
+          <input name="loginId" placeholder="아이디" autocomplete="username" autocapitalize="off" spellcheck="false" /></label>
+        <label class="ifield"><span class="ic">🔒</span>
+          <input name="password" type="password" placeholder="비밀번호" autocomplete="current-password" />
+          <button type="button" class="eye" data-eye>보기</button></label>
+        <p class="auth-error" id="login-error" hidden></p>
+        <button class="btn primary block" id="login-btn">로그인</button>
+        <div class="divider"><span>처음이신가요?</span></div>
+        <a class="btn ghost block" href="#/signup">✨ 새 계정 만들기</a>
+        <details class="demo">
+          <summary>🎬 시연용 데모 계정으로 둘러보기</summary>
+          <div class="demo-grid">${DEMO_ACCOUNTS.map(([id, name, emoji, g]) => `
+            <button type="button" class="demo-acc ${g === 'F' ? 'f' : 'm'}" data-demo="${id}">
+              <span>${emoji}</span><b>${name}</b><small>${g === 'F' ? '여' : '남'} · @${id}</small>
+            </button>`).join('')}</div>
+          <p class="small muted center" style="margin:8px 0 0">서로 다른 성별로 두 기기에서 로그인하면 실시간 매칭을 볼 수 있어요</p>
+        </details>
+      </form>
+    </div>`;
+
+  bindEyeToggles($view);
+  const form = $view.querySelector('#login');
+  const errEl = $view.querySelector('#login-error');
+  const btn = $view.querySelector('#login-btn');
+
+  const login = async (loginId, password) => {
+    errEl.hidden = true;
+    btn.disabled = true;
+    btn.textContent = '로그인 중…';
+    try {
+      onAuthed(await api('POST', '/api/auth/login', { loginId, password }));
+      toast(`반가워요! 👋`);
+    } catch (err) {
+      errEl.textContent = err.message;
+      errEl.hidden = false;
+      form.classList.remove('shake'); void form.offsetWidth; form.classList.add('shake');
+      btn.disabled = false;
+      btn.textContent = '로그인';
+    }
   };
+  form.onsubmit = e => {
+    e.preventDefault();
+    const loginId = form.loginId.value.trim(), password = form.password.value;
+    if (!loginId || !password) {
+      errEl.textContent = '아이디와 비밀번호를 입력해주세요';
+      errEl.hidden = false;
+      return;
+    }
+    login(loginId, password);
+  };
+  $view.querySelectorAll('[data-demo]').forEach(b => b.onclick = () => login(b.dataset.demo, 'demo1234'));
+}
+
+function bindEyeToggles(root) {
+  root.querySelectorAll('[data-eye]').forEach(b => b.onclick = () => {
+    const input = b.parentElement.querySelector('input');
+    const show = input.type === 'password';
+    input.type = show ? 'text' : 'password';
+    b.textContent = show ? '숨기기' : '보기';
+  });
+}
+
+function passwordStrength(pw) {
+  if (!pw) return { score: 0, label: '' };
+  let score = 0;
+  if (pw.length >= 6) score++;
+  if (pw.length >= 8 && /[a-zA-Z]/.test(pw) && /\d/.test(pw)) score++;
+  if (pw.length >= 10 && /[^a-zA-Z0-9]/.test(pw) || pw.length >= 14) score++;
+  return { score, label: ['너무 짧아요', '보통', '좋아요', '아주 안전해요'][score] };
 }
 
 function renderSignup() {
-  const form = { step: 1, loginId: '', password: '', gender: '', avatar: '🐰', photo: null, photoPreview: null };
+  const form = {
+    step: 1, loginId: '', idOk: false, password: '', password2: '',
+    avatar: '🐰', photoPreview: null, nickname: '', gender: '', age: '',
+    school: '', dept: '', mbti: ['', '', '', ''], bio: '',
+  };
+  const STEPS = [
+    { emoji: '🔐', title: '로그인에 쓸\n계정을 만들어요', desc: '아이디는 프로필 주소로도 쓰여요' },
+    { emoji: '🙋', title: '어떤 사람인지\n알려주세요', desc: '사진이 있으면 메모를 떼갈 확률이 올라가요' },
+    { emoji: '🎓', title: '학교 정보를\n입력해주세요', desc: '과팅은 다른 과, 학팅은 다른 학교와 매칭돼요' },
+  ];
+  const MBTI_PAIRS = [['E', 'I'], ['N', 'S'], ['T', 'F'], ['J', 'P']];
+
+  const hint = (el, text, state) => { el.textContent = text; el.className = 'hint ' + (state || ''); };
 
   const draw = () => {
+    const s = STEPS[form.step - 1];
+    $view.innerHTML = `
+      <div class="signup">
+        <div class="signup-top">
+          <button class="back" id="prev">‹</button>
+          <div class="progress"><i style="width:${(form.step / 3) * 100}%"></i></div>
+          <span class="small muted">${form.step}/3</span>
+        </div>
+        <div class="signup-body" id="body">
+          <div class="step-emoji">${s.emoji}</div>
+          <h1>${s.title.replace('\n', '<br/>')}</h1>
+          <p class="muted">${s.desc}</p>
+          <div class="step-fields">${fieldsHtml()}</div>
+        </div>
+        <div class="signup-foot">
+          <button class="btn primary block" id="next" disabled>${form.step === 3 ? '가입 완료 🎉' : '다음'}</button>
+          ${form.step === 1 ? `<p class="small muted center" style="margin:12px 0 0">이미 계정이 있나요? <a href="#/login" class="link">로그인</a></p>` : ''}
+        </div>
+      </div>`;
+    $view.querySelector('#prev').onclick = () => {
+      if (form.step === 1) location.hash = '#/login';
+      else { form.step--; draw(); }
+    };
+    bindEyeToggles($view);
+    bindStep();
+  };
+
+  function fieldsHtml() {
+    if (form.step === 1) return `
+      <div class="tfield"><label>아이디</label>
+        <div class="ifield"><span class="ic">@</span><input id="loginId" value="${esc(form.loginId)}" maxlength="16" placeholder="영문 소문자, 숫자 4~16자" autocomplete="username" autocapitalize="off" spellcheck="false" /></div>
+        <p class="hint" id="id-hint"></p></div>
+      <div class="tfield"><label>비밀번호</label>
+        <div class="ifield"><span class="ic">🔒</span><input id="password" type="password" value="${esc(form.password)}" placeholder="6자 이상" autocomplete="new-password" /><button type="button" class="eye" data-eye>보기</button></div>
+        <div class="strength" id="strength"><i></i><i></i><i></i><span></span></div></div>
+      <div class="tfield"><label>비밀번호 확인</label>
+        <div class="ifield"><span class="ic">✅</span><input id="password2" type="password" value="${esc(form.password2)}" placeholder="한 번 더 입력" autocomplete="new-password" /><button type="button" class="eye" data-eye>보기</button></div>
+        <p class="hint" id="pw2-hint"></p></div>`;
+
+    if (form.step === 2) return `
+      <div class="photo-pick">
+        <button type="button" class="profile-pic big" id="photo">${form.photoPreview ? `<img src="${form.photoPreview}" />` : form.avatar}<i>📷</i></button>
+        <div class="emoji-row">${AVATARS.map(a => `<button type="button" data-av="${a}" class="${a === form.avatar && !form.photoPreview ? 'on' : ''}">${a}</button>`).join('')}</div>
+      </div>
+      <div class="tfield"><label>닉네임 <span class="counter" id="nick-count">${form.nickname.length}/12</span></label>
+        <div class="ifield"><input id="nickname" value="${esc(form.nickname)}" maxlength="12" placeholder="예) 새내기곰" /></div></div>
+      <div class="tfield"><label>성별 <span class="muted">· 가입 후 변경할 수 없어요</span></label>
+        <div class="gender-cards">
+          <button type="button" data-g="M" class="${form.gender === 'M' ? 'on' : ''}"><span>🙋‍♂️</span>남자</button>
+          <button type="button" data-g="F" class="${form.gender === 'F' ? 'on' : ''}"><span>🙋‍♀️</span>여자</button>
+        </div></div>
+      <div class="tfield"><label>나이</label>
+        <div class="ifield"><input id="age" type="number" inputmode="numeric" min="18" max="40" value="${esc(form.age)}" placeholder="22" /><span class="suffix">살</span></div>
+        <p class="hint" id="age-hint"></p></div>`;
+
+    return `
+      <div class="tfield"><label>학교</label>
+        <div class="ifield"><span class="ic">🏫</span><input id="school" value="${esc(form.school)}" maxlength="30" placeholder="한국대학교" /></div></div>
+      <div class="tfield"><label>학과</label>
+        <div class="ifield"><span class="ic">📚</span><input id="dept" value="${esc(form.dept)}" maxlength="30" placeholder="컴퓨터공학과" /></div></div>
+      <div class="tfield"><label>MBTI <span class="muted">· 선택</span></label>
+        <div class="mbti">${MBTI_PAIRS.map((pair, i) => `<div class="mbti-pair">${pair.map(ch =>
+          `<button type="button" data-mbti="${i}" data-ch="${ch}" class="${form.mbti[i] === ch ? 'on' : ''}">${ch}</button>`).join('')}</div>`).join('')}</div></div>
+      <div class="tfield"><label>한 줄 소개 <span class="muted">· 선택</span> <span class="counter" id="bio-count">${form.bio.length}/150</span></label>
+        <textarea class="input" id="bio" maxlength="150" placeholder="맛집 탐방 좋아해요 🍜 주말엔 전시회!">${esc(form.bio)}</textarea></div>`;
+  }
+
+  function bindStep() {
+    const next = $view.querySelector('#next');
+    const $ = id => $view.querySelector('#' + id);
+
     if (form.step === 1) {
-      $view.innerHTML = `
-        <div class="top">${back('#/login')}<h2 class="grow">회원가입</h2><span class="small muted">1 / 2</span></div>
-        <form class="pad" id="step1" style="padding-top:12px">
-          <h1 style="font-size:24px;margin:8px 0 24px">로그인에 쓸<br/>아이디를 만들어주세요</h1>
-          <div class="field"><label>아이디 <span class="muted" id="id-hint">영문 소문자·숫자 4~16자</span></label>
-            <input class="input" name="loginId" value="${esc(form.loginId)}" autocomplete="username" autocapitalize="off" maxlength="16" /></div>
-          <div class="field"><label>비밀번호 <span class="muted">6자 이상</span></label>
-            <input class="input" name="password" type="password" autocomplete="new-password" /></div>
-          <div class="field"><label>비밀번호 확인</label>
-            <input class="input" name="password2" type="password" autocomplete="new-password" /></div>
-          <button class="btn primary block" style="margin-top:8px">다음</button>
-        </form>`;
-      const idInput = $view.querySelector('[name=loginId]');
-      const hint = $view.querySelector('#id-hint');
-      let t;
-      idInput.oninput = () => {
-        clearTimeout(t);
-        const v = idInput.value.trim().toLowerCase();
-        if (v.length < 4) { hint.textContent = '영문 소문자·숫자 4~16자'; hint.style.color = ''; return; }
-        t = setTimeout(async () => {
-          const { available } = await api('GET', `/api/auth/check-id?loginId=${encodeURIComponent(v)}`);
-          hint.textContent = available ? '✓ 사용할 수 있어요' : '✕ 사용할 수 없어요';
-          hint.style.color = available ? '#1f9d55' : '#ff4d6d';
-        }, 300);
+      const idHint = $('id-hint'), pw2Hint = $('pw2-hint'), strength = $('strength');
+      let timer, seq = 0;
+      const validate = () => {
+        const s = passwordStrength(form.password);
+        strength.dataset.score = s.score;
+        strength.querySelector('span').textContent = s.label;
+        if (!form.password2) hint(pw2Hint, '');
+        else if (form.password === form.password2) hint(pw2Hint, '✓ 비밀번호가 일치해요', 'ok');
+        else hint(pw2Hint, '비밀번호가 서로 달라요', 'err');
+        next.disabled = !(form.idOk && form.password.length >= 6 && form.password === form.password2);
       };
-      $view.querySelector('#step1').onsubmit = async e => {
-        e.preventDefault();
-        const f = new FormData(e.target);
-        const loginId = String(f.get('loginId')).trim().toLowerCase();
-        if (!/^[a-z0-9_.]{4,16}$/.test(loginId)) return toast('아이디는 영문 소문자/숫자 4~16자예요');
-        if (String(f.get('password')).length < 6) return toast('비밀번호는 6자 이상이에요');
-        if (f.get('password') !== f.get('password2')) return toast('비밀번호가 서로 달라요');
-        const { available } = await api('GET', `/api/auth/check-id?loginId=${encodeURIComponent(loginId)}`);
-        if (!available) return toast('이미 사용 중인 아이디예요');
-        Object.assign(form, { loginId, password: f.get('password'), step: 2 });
-        draw();
+      const checkId = () => {
+        clearTimeout(timer);
+        form.idOk = false;
+        const v = form.loginId;
+        if (!v) hint(idHint, '');
+        else if (!/^[a-z0-9_.]{4,16}$/.test(v)) hint(idHint, v.length < 4 ? '4자 이상 입력해주세요' : '영문 소문자, 숫자, _ . 만 쓸 수 있어요', 'err');
+        else {
+          hint(idHint, '확인 중…');
+          const my = ++seq;
+          timer = setTimeout(async () => {
+            try {
+              const { available } = await api('GET', `/api/auth/check-id?loginId=${encodeURIComponent(v)}`);
+              if (my !== seq) return;
+              form.idOk = available;
+              hint(idHint, available ? '✓ 멋진 아이디예요' : '이미 사용 중인 아이디예요', available ? 'ok' : 'err');
+            } catch { hint(idHint, '확인에 실패했어요', 'err'); }
+            validate();
+          }, 300);
+        }
+        validate();
       };
+      $('loginId').oninput = e => { form.loginId = e.target.value = e.target.value.toLowerCase().replace(/\s/g, ''); checkId(); };
+      $('password').oninput = e => { form.password = e.target.value; validate(); };
+      $('password2').oninput = e => { form.password2 = e.target.value; validate(); };
+      if (form.loginId) checkId(); else validate();
+      next.onclick = () => { form.step = 2; draw(); };
+      $('loginId').focus();
       return;
     }
 
-    $view.innerHTML = `
-      <div class="top"><button class="back" id="prev">‹</button><h2 class="grow">프로필 만들기</h2><span class="small muted">2 / 2</span></div>
-      <div class="pad" style="padding-top:8px">
-        <div class="center" style="margin:6px 0 20px">
-          <button class="profile-pic big" id="photo">${form.photoPreview ? `<img src="${form.photoPreview}" />` : form.avatar}<i>📷</i></button>
-          <div class="small muted" style="margin-top:8px">사진을 올리거나 이모지를 골라주세요</div>
-        </div>
-        <div class="field"><div class="avatars">${AVATARS.map(a => `<button data-av="${a}" class="${a === form.avatar && !form.photoPreview ? 'on' : ''}">${a}</button>`).join('')}</div></div>
-        <div class="field"><label>닉네임</label><input class="input" id="nickname" maxlength="12" placeholder="예) 새내기곰" /></div>
-        <div class="field"><label>성별 <span class="muted">가입 후 변경 불가</span></label>
-          <div class="seg"><button data-g="M">남자</button><button data-g="F">여자</button></div></div>
-        <div style="display:flex;gap:10px">
-          <div class="field" style="flex:2"><label>학교</label><input class="input" id="school" placeholder="한국대학교" /></div>
-          <div class="field" style="flex:1"><label>나이</label><input class="input" id="age" type="number" inputmode="numeric" placeholder="22" /></div>
-        </div>
-        <div style="display:flex;gap:10px">
-          <div class="field" style="flex:2"><label>학과</label><input class="input" id="dept" placeholder="컴퓨터공학과" /></div>
-          <div class="field" style="flex:1"><label>MBTI</label><input class="input" id="mbti" maxlength="4" placeholder="ENFP" style="text-transform:uppercase" /></div>
-        </div>
-        <div class="field"><label>소개 (선택)</label><textarea class="input" id="bio" maxlength="150" placeholder="맛집 탐방 좋아해요 🍜"></textarea></div>
-        <button class="btn primary block" id="done" style="margin:8px 0 30px">가입 완료</button>
-      </div>`;
-    $view.querySelector('#prev').onclick = () => { form.step = 1; draw(); };
-    const pic = $view.querySelector('#photo');
-    pic.onclick = async () => {
-      const [file] = await pickImages();
-      if (!file) return;
-      form.photoPreview = await resizeImage(file, 480, true);
-      pic.innerHTML = `<img src="${form.photoPreview}" /><i>📷</i>`;
-      $view.querySelectorAll('[data-av]').forEach(x => x.classList.remove('on'));
-    };
-    $view.querySelectorAll('[data-av]').forEach(b => b.onclick = () => {
-      form.avatar = b.dataset.av; form.photoPreview = null;
-      pic.innerHTML = `${form.avatar}<i>📷</i>`;
-      $view.querySelectorAll('[data-av]').forEach(x => x.classList.toggle('on', x === b));
+    if (form.step === 2) {
+      const pic = $('photo');
+      const validate = () => {
+        const age = Number(form.age);
+        const ageOk = !form.age || (age >= 18 && age <= 40);
+        hint($('age-hint'), ageOk ? '' : '18~40 사이로 입력해주세요', ageOk ? '' : 'err');
+        next.disabled = !(form.nickname.trim() && form.gender && ageOk);
+      };
+      pic.onclick = async () => {
+        const [file] = await pickImages();
+        if (!file) return;
+        form.photoPreview = await resizeImage(file, 480, true);
+        pic.innerHTML = `<img src="${form.photoPreview}" /><i>📷</i>`;
+        $view.querySelectorAll('[data-av]').forEach(x => x.classList.remove('on'));
+      };
+      $view.querySelectorAll('[data-av]').forEach(b => b.onclick = () => {
+        form.avatar = b.dataset.av; form.photoPreview = null;
+        pic.innerHTML = `${form.avatar}<i>📷</i>`;
+        $view.querySelectorAll('[data-av]').forEach(x => x.classList.toggle('on', x === b));
+      });
+      $('nickname').oninput = e => { form.nickname = e.target.value; $('nick-count').textContent = `${form.nickname.length}/12`; validate(); };
+      $('age').oninput = e => { form.age = e.target.value; validate(); };
+      $view.querySelectorAll('[data-g]').forEach(b => b.onclick = () => {
+        form.gender = b.dataset.g;
+        $view.querySelectorAll('[data-g]').forEach(x => x.classList.toggle('on', x === b));
+        validate();
+      });
+      validate();
+      next.onclick = () => { form.step = 3; draw(); };
+      return;
+    }
+
+    const validate = () => { next.disabled = !(form.school.trim() && form.dept.trim()); };
+    $('school').oninput = e => { form.school = e.target.value; validate(); };
+    $('dept').oninput = e => { form.dept = e.target.value; validate(); };
+    $('bio').oninput = e => { form.bio = e.target.value; $('bio-count').textContent = `${form.bio.length}/150`; };
+    $view.querySelectorAll('[data-mbti]').forEach(b => b.onclick = () => {
+      const i = Number(b.dataset.mbti);
+      form.mbti[i] = form.mbti[i] === b.dataset.ch ? '' : b.dataset.ch;
+      $view.querySelectorAll(`[data-mbti="${i}"]`).forEach(x => x.classList.toggle('on', x.dataset.ch === form.mbti[i]));
     });
-    $view.querySelectorAll('[data-g]').forEach(b => b.onclick = () => {
-      form.gender = b.dataset.g;
-      $view.querySelectorAll('[data-g]').forEach(x => x.classList.toggle('on', x === b));
-    });
-    $view.querySelector('#done').onclick = async e => {
-      const v = id => $view.querySelector('#' + id).value.trim();
-      if (!v('nickname') || !form.gender || !v('school') || !v('dept')) return toast('닉네임, 성별, 학교, 학과를 입력해주세요');
-      e.target.disabled = true;
+    validate();
+
+    next.onclick = async () => {
+      next.disabled = true;
+      next.textContent = '가입하는 중…';
       try {
+        const mbti = form.mbti.every(Boolean) ? form.mbti.join('') : '';
         const res = await api('POST', '/api/auth/signup', {
           loginId: form.loginId, password: form.password, gender: form.gender, avatar: form.avatar,
-          nickname: v('nickname'), school: v('school'), dept: v('dept'), age: v('age'), mbti: v('mbti'), bio: v('bio'),
+          nickname: form.nickname.trim(), school: form.school.trim(), dept: form.dept.trim(), age: form.age, mbti, bio: form.bio,
         });
         token = res.token; // 사진 업로드에 토큰이 필요
-        if (form.photoPreview) res.user = await api('PATCH', '/api/users/me', { photo: await uploadImage(form.photoPreview) });
+        if (form.photoPreview) {
+          try { res.user = await api('PATCH', '/api/users/me', { photo: await uploadImage(form.photoPreview) }); }
+          catch { toast('사진은 프로필 편집에서 다시 올려주세요'); }
+        }
         onAuthed(res);
-      } catch (err) { toast(err.message); e.target.disabled = false; }
+        toast(`${res.user.nickname}님, 환영해요! 🎉`);
+      } catch (err) {
+        toast(err.message);
+        next.disabled = false;
+        next.textContent = '가입 완료 🎉';
+      }
     };
-  };
+  }
+
   draw();
 }
 
@@ -445,9 +611,29 @@ async function renderCalendar(type, silent = false) {
     const el = $view.querySelector('#day-panel');
     if (!ui.selDate) { el.innerHTML = `<p class="muted small center">날짜를 눌러 붙어있는 메모를 확인하세요</p>`; return; }
     const list = byDate[ui.selDate] || [];
+    const myList = mine.posts.filter(p => p.type === type && p.date === ui.selDate);
+    const myHtml = myList.map(p => `
+      <div class="memo-item mine-memo">
+        <div class="row">
+          <div class="faces">${faces(p.team.members)}</div>
+          <div class="grow">
+            <div class="row" style="gap:6px"><b>내 메모</b><span class="badge accent">${sizeLabel(p.size)}</span></div>
+            <div class="small muted ellipsis">${p.team.members.map(m => esc(m.nickname)).join(' · ')}</div>
+          </div>
+          ${p.status === 'matched' ? '<span class="badge green">매칭 완료</span>'
+            : p.team.full ? '<span class="badge accent">게시중</span>'
+            : `<span class="badge gray">팀원 ${p.team.members.length}/${p.size}</span>`}
+        </div>
+        <p class="memo-text">“${esc(p.message || '메모 없음')}”</p>
+        <div class="small muted">${p.status === 'matched' ? '매칭 탭에서 채팅할 수 있어요'
+          : p.team.full ? '이성 팀이 떼가길 기다리는 중이에요'
+          : '팀원이 다 모이면 다른 사람에게 공개돼요'}</div>
+        ${p.status === 'open' && !p.team.full ? `<button class="btn sm primary" style="margin-top:10px" data-share="${p.team.id}" data-size="${p.size}">친구 초대</button>` : ''}
+      </div>`).join('');
     el.innerHTML = `
+      ${myHtml}
       <div class="row" style="margin-bottom:12px">
-        <b class="grow">${prettyDate(ui.selDate)} · 메모 ${list.length}장</b>
+        <b class="grow">${prettyDate(ui.selDate)} · 뗄 수 있는 메모 ${list.length}장</b>
         ${list.length ? `<a class="small" style="color:var(--accent);font-weight:700" href="#/${type}/day/${ui.selDate}">🃏 카드로 넘겨보기</a>` : ''}
       </div>
       ${list.length ? list.map((p, i) => `
@@ -467,6 +653,7 @@ async function renderCalendar(type, silent = false) {
           </div>
         </div>`).join('')
       : `<div class="card center muted small" style="margin:0">아직 붙은 메모가 없어요.<br/>먼저 등록해서 떼가길 기다려보세요!</div>`}`;
+    el.querySelectorAll('[data-share]').forEach(b => b.onclick = () => shareInvite(b.dataset.share, Number(b.dataset.size)));
     el.querySelectorAll('[data-take]').forEach(b => b.onclick = () => {
       const post = list.find(p => p.id === b.dataset.take);
       takePost(post, () => renderCalendar(type), () => {});
