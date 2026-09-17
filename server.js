@@ -1,19 +1,16 @@
-// Node 서버: 정적 파일 + JSON API + Socket.IO 실시간 + data.json 저장
+// Node 서버: 정적 파일 + JSON API + Socket.IO 실시간 + PostgreSQL(또는 data.json) 저장
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { Server } = require('socket.io');
+const { createStore } = require('./store');
 
 const PORT = process.env.PORT || 3000;
-// DATA_DIR: 배포 환경에서 영구 볼륨 경로 (예: Railway 볼륨 /data)
+// DATA_DIR: DB 없이 파일로 저장할 때의 경로 (예: Railway 볼륨 /data)
 const DATA_DIR = process.env.DATA_DIR || process.env.RAILWAY_VOLUME_MOUNT_PATH || __dirname;
-const DATA_FILE = path.join(DATA_DIR, 'data.json');
 const PUBLIC_DIR = path.join(__dirname, 'public');
-const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
 const MAX_BODY = 8 * 1024 * 1024;
-
-fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
 const id = () => crypto.randomBytes(6).toString('hex');
 const now = () => Date.now();
@@ -22,19 +19,9 @@ function fmt(dt) {
   return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
 }
 
-let db = { users: {}, sessions: {}, teams: {}, posts: {}, matches: {}, feed: {} };
-if (fs.existsSync(DATA_FILE)) {
-  db = { ...db, ...JSON.parse(fs.readFileSync(DATA_FILE, 'utf8')) };
-} else {
-  seed();
-  fs.writeFileSync(DATA_FILE, JSON.stringify(db, null, 2));
-}
-
-let saveTimer = null;
-function save() {
-  clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => fs.writeFileSync(DATA_FILE, JSON.stringify(db, null, 2)), 100);
-}
+let store = null;
+let db = null;
+const save = () => store.save();
 
 // ---------- 비밀번호 ----------
 function hashPassword(password, salt = crypto.randomBytes(16).toString('hex')) {
@@ -112,6 +99,11 @@ const uploadUrlOk = url => url === null || (typeof url === 'string' && /^\/uploa
 // ---------- 실시간 ----------
 let io = null;
 const emitToUsers = (userIds, event, payload) => io && userIds.forEach(uid => io.to(`user:${uid}`).emit(event, payload));
+// 캘린더를 보고 있는 모든 사람에게 메모 변경 알림
+const broadcastPosts = (post, action, by) => io && io.emit('posts:changed', {
+  type: post.type, date: post.date, size: post.size, action, by,
+  gender: db.teams[post.teamId]?.gender, dept: publicUser(db.teams[post.teamId]?.leaderId)?.dept,
+});
 const matchMembers = m => [...db.teams[m.teamA].members, ...db.teams[m.teamB].members];
 const isMatchMember = (m, uid) => inTeam(db.teams[m.teamA], uid) || inTeam(db.teams[m.teamB], uid);
 const unreadCount = (m, uid) => {
@@ -207,14 +199,14 @@ route('PATCH', '/api/users/me', ({ uid, body }) => {
   return publicUser(user.id);
 });
 
-route('POST', '/api/uploads', ({ uid, body }) => {
+route('POST', '/api/uploads', async ({ uid, body }) => {
   auth(uid);
   const m = String(body.data || '').match(/^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$/);
   need(m, 400, '이미지 파일만 올릴 수 있어요');
   const buf = Buffer.from(m[2], 'base64');
   need(buf.length <= 4 * 1024 * 1024, 413, '사진이 너무 커요 (최대 4MB)');
   const name = `${crypto.randomBytes(12).toString('hex')}.${m[1] === 'jpeg' ? 'jpg' : m[1]}`;
-  fs.writeFileSync(path.join(UPLOAD_DIR, name), buf);
+  await store.putUpload(name, `image/${m[1]}`, buf);
   return { url: `/uploads/${name}` };
 });
 
@@ -285,6 +277,7 @@ route('POST', '/api/posts', ({ uid, body }) => {
   const post = { id: id(), type: body.type, size, teamId: team.id, date: body.date, message: clean(body.message, 80), status: 'open', createdAt: now() };
   db.posts[post.id] = post;
   save();
+  if (size === 1) broadcastPosts(post, 'created', user.id);
   return postView(post);
 });
 
@@ -294,6 +287,7 @@ route('DELETE', '/api/posts/:id', ({ uid, params }) => {
   need(post.status === 'open', 409, '이미 매칭된 게시글이에요');
   post.status = 'cancelled';
   save();
+  broadcastPosts(post, 'removed', uid);
   return { ok: true };
 });
 
@@ -325,6 +319,9 @@ route('POST', '/api/teams/:id/join', ({ uid, params }) => {
   save();
   const view = teamView(team);
   emitToUsers(team.members, 'team:update', { team: view, joined: publicUser(user.id) });
+  // 팀이 다 모이면 메모가 캘린더에 공개됨
+  const post = Object.values(db.posts).find(p => p.teamId === team.id && p.status === 'open');
+  if (post && view.full) broadcastPosts(post, 'created', user.id);
   return view;
 });
 
@@ -362,6 +359,7 @@ route('POST', '/api/posts/:id/take', ({ uid, params, body }) => {
   db.matches[match.id] = match;
   save();
   emitToUsers(matchMembers(match), 'match:new', { match: matchView(match), takenBy: publicUser(user.id) });
+  broadcastPosts(post, 'taken', user.id);
   return matchView(match);
 });
 
@@ -427,17 +425,48 @@ const server = http.createServer(async (req, res) => {
       const token = (req.headers.authorization || '').replace(/^Bearer /, '');
       let body = {};
       try { body = raw ? JSON.parse(raw) : {}; } catch { fail(400, '잘못된 요청'); }
-      send(200, r.handler({ params, query: Object.fromEntries(url.searchParams), body, token, uid: userFromToken(token) }));
+      send(200, await r.handler({ params, query: Object.fromEntries(url.searchParams), body, token, uid: userFromToken(token) }));
     } catch (e) {
       if (!e.status) console.error(e);
       send(e.status || 500, { error: e.status ? e.message : '서버 오류' });
     }
     return;
   }
-  if (url.pathname.startsWith('/uploads/')) return serveFile(res, UPLOAD_DIR, url.pathname.slice('/uploads'.length));
+  if (url.pathname.startsWith('/uploads/')) {
+    const name = url.pathname.slice('/uploads/'.length);
+    const file = /^[a-f0-9]+\.(jpg|png|webp)$/.test(name) && await store.getUpload(name).catch(() => null);
+    if (!file) { res.writeHead(404); return res.end(); }
+    res.writeHead(200, { 'Content-Type': file.mime || MIME[path.extname(name)], 'Cache-Control': 'public, max-age=31536000, immutable' });
+    return res.end(file.buf);
+  }
   serveFile(res, PUBLIC_DIR, url.pathname === '/' ? '/index.html' : url.pathname, path.join(PUBLIC_DIR, 'index.html'));
 });
 
+async function main() {
+  store = await createStore({ dataDir: DATA_DIR });
+  db = store.db;
+  if (store.isNew) { seed(); save(); }
+  console.log(`저장소: ${store.kind}`);
+
+  // 배포 서버가 꺼질 때 남은 변경사항 저장
+  for (const sig of ['SIGTERM', 'SIGINT']) {
+    process.once(sig, async () => {
+      console.log('종료 중… 데이터 저장');
+      await store.flush().catch(e => console.error(e));
+      process.exit(0);
+    });
+  }
+
+  startSocket();
+  server.listen(PORT, () => console.log(`땔래말래 실행 중 → http://localhost:${PORT}`));
+}
+
+main().catch(e => {
+  console.error('서버 시작 실패:', e.message);
+  process.exit(1);
+});
+
+function startSocket() {
 io = new Server(server);
 io.use((socket, next) => {
   const uid = userFromToken(socket.handshake.auth?.token);
@@ -464,5 +493,4 @@ io.on('connection', socket => {
     emitToUsers(matchMembers(m).filter(u => u !== uid), 'chat:typing', { matchId, user: publicUser(uid) });
   }));
 });
-
-server.listen(PORT, () => console.log(`과팅 앱 실행 중 → http://localhost:${PORT}`));
+}

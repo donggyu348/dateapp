@@ -135,6 +135,25 @@ function connectSocket() {
     if (location.hash === '#/me' || location.hash === '#/invite/' + team.id) current.render?.();
   });
 
+  // 다른 사람이 메모를 붙이거나 떼면 캘린더에 바로 반영
+  socket.on('posts:changed', async ev => {
+    const hash = location.hash;
+    const mine = ev.by === me.id;
+    if (!mine && ev.gender && ev.gender !== me.gender && ev.action === 'created') {
+      toast(`📌 ${prettyDate(ev.date)}에 ${ev.dept || ''} ${sizeLabel(ev.size)} 메모가 새로 붙었어요`, () => {
+        ui.selDate = ev.date;
+        location.hash = '#/' + ev.type;
+      });
+    }
+    if (hash === '#/' + ev.type) {
+      const st = $view.scrollTop;
+      await renderCalendar(ev.type, true);
+      $view.scrollTop = st;
+    } else if (hash === `#/${ev.type}/day/${ev.date}` && !mine && ev.action === 'taken') {
+      toast('누군가 이 날짜의 메모를 방금 떼갔어요 👀');
+    }
+  });
+
   socket.on('chat:typing', ({ matchId, user }) => {
     if (current.chatId === matchId) current.onTyping?.(user);
   });
@@ -347,11 +366,20 @@ function renderSignup() {
 }
 
 // ================= 캘린더 (과팅/학팅 메인) =================
-async function renderCalendar(type) {
+// silent: 실시간 갱신 — 데이터를 먼저 받아서 화면 깜빡임 없이 교체
+async function renderCalendar(type, silent = false) {
   const now = new Date();
   const cur = ui.month[type] || (ui.month[type] = { y: now.getFullYear(), m: now.getMonth() });
   const monthKey = `${cur.y}-${pad(cur.m + 1)}`;
   if (!ui.selDate || !ui.selDate.startsWith(monthKey)) ui.selDate = monthKey === todayStr().slice(0, 7) ? todayStr() : null;
+
+  const load = Promise.all([api('GET', `/api/posts?type=${type}&month=${monthKey}`), api('GET', '/api/me')])
+    .catch(e => { toast(e.message); return [[], { posts: [] }]; });
+  let posts, mine;
+  if (silent) {
+    [posts, mine] = await load;
+    if (location.hash !== '#/' + type) return;
+  }
 
   $view.innerHTML = `
     <div class="top"><h1 class="logo">${TYPE_LABEL[type]}</h1><div class="grow"></div>
@@ -371,11 +399,10 @@ async function renderCalendar(type) {
   $view.querySelectorAll('[data-size]').forEach(b => b.onclick = () => { ui.size = Number(b.dataset.size); renderCalendar(type); });
   $view.querySelector('#register').onclick = () => openRegisterSheet(type, ui.selDate);
 
-  let posts = [], mine = { posts: [] };
-  try {
-    [posts, mine] = await Promise.all([api('GET', `/api/posts?type=${type}&month=${monthKey}`), api('GET', '/api/me')]);
-  } catch (e) { toast(e.message); }
-  if (location.hash !== '#/' + type) return;
+  if (!silent) {
+    [posts, mine] = await load;
+    if (location.hash !== '#/' + type) return;
+  }
 
   // 이성 팀 + 인원 필터
   const visible = posts.filter(p => p.team.gender !== me.gender && (!ui.size || p.size === ui.size));
