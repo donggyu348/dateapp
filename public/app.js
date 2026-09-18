@@ -453,88 +453,116 @@ const toPayload = p => ({
 });
 
 // ================= 홈 (대시보드) =================
+// 진단 점수를 사람이 읽기 쉬운 말로
+const level = v => v >= 70 ? { t: '좋음', c: 'lv-good' } : v >= 40 ? { t: '보통', c: 'lv-mid' } : { t: '보완 필요', c: 'lv-low' };
+
 async function renderHome() {
-  $view.innerHTML = `<div class="page">${pageHead(`${esc(me.profile.name)}님의 스펙 설계`, '불러오는 중…')}<div class="skeleton"></div></div>`;
+  $view.innerHTML = `<div class="page"><div class="skeleton tall"></div></div>`;
   let d;
   try { d = await api('GET', '/api/dashboard'); } catch (e) { return toast(e.message); }
   const p = me.profile;
-  const axes = Object.entries(d.diag.axes);
+  const gaps = d.diag.gaps.map(g => AXIS_LABEL[g]);
 
   $view.innerHTML = `
     <div class="page">
-      ${pageHead(`${esc(p.name)}님의 스펙 설계`, `${esc(p.school)} · ${esc(p.major)} · ${esc(META.GRADES[p.grade] || '')} · 목표 ${esc(META.GOALS[p.goal])}${p.jobTitle ? ` (${esc(p.jobTitle)})` : ''}`,
-        `<a class="btn ghost" href="#/me/edit">프로필 수정</a>`)}
-
-      <div class="stat-row">
-        <div class="stat"><small>지금 지원 가능한 공고</small><b>${d.counts.open}</b></div>
-        <div class="stat"><small>나와 잘 맞는 공고 <em>70점 이상</em></small><b class="accent">${d.counts.goodFit}</b></div>
-        <div class="stat"><small>저장한 활동</small><b>${d.counts.saved}</b></div>
-        <div class="stat"><small>지원 완료</small><b>${d.counts.applied}</b></div>
-      </div>
+      <section class="hello">
+        <div class="hello-text">
+          <p class="eyebrow">${esc(p.school)} · ${esc(p.major)} · ${esc(META.GRADES[p.grade] || '')}</p>
+          <h1>${esc(p.name)}님, ${gaps.length
+            ? `지금은 <mark>${esc(gaps[0])}</mark>부터 채워보면 좋아요`
+            : '스펙이 고르게 잘 갖춰져 있어요'}</h1>
+          <p class="lead">목표 · ${esc(META.GOALS[p.goal])}${p.jobTitle ? ` · ${esc(p.jobTitle)}` : ''}</p>
+          <div class="hello-actions">
+            <a class="btn primary lg" href="#/explore">나에게 맞는 공고 보기</a>
+            <a class="btn ghost lg" href="#/roadmap">${d.plan ? '내 로드맵' : '로드맵 만들기'}</a>
+          </div>
+        </div>
+        <dl class="hello-stats">
+          <div><dt>잘 맞는 공고</dt><dd>${d.counts.goodFit}<small>개</small></dd></div>
+          <div><dt>저장한 활동</dt><dd>${d.counts.saved}<small>개</small></dd></div>
+          <div><dt>지원 완료</dt><dd>${d.counts.applied}<small>개</small></dd></div>
+        </dl>
+      </section>
 
       <div class="cols">
-        <section class="card diag">
-          <div class="card-head"><h2>스펙 진단</h2><span class="muted small">입력한 경험 기준 · 0~100</span></div>
-          <div class="diag-body">
-            <div class="diag-total">
-              ${ring(d.diag.total, 120, { unit: '점', title: `종합 스펙 지수 ${d.diag.total}점 (100점 만점)` })}
-              <p>종합 스펙 지수</p>
-            </div>
-            <ul class="bars">${axes.map(([k, v]) => `
-              <li title="${AXIS_LABEL[k]}: ${v}점 — ${AXIS_HINT[k]}">
-                <span class="bar-label">${AXIS_LABEL[k]}${d.diag.gaps.includes(k) ? '<i class="gap-flag">보완</i>' : ''}</span>
-                <span class="bar-track"><span class="bar-fill" style="width:${Math.max(v, 2)}%"></span></span>
-                <b class="bar-val">${v}</b>
-              </li>`).join('')}</ul>
+        <section class="card">
+          <div class="card-head">
+            <h2>내 스펙 진단</h2>
+            <span class="total-pill" title="6개 영역을 목표에 맞게 가중 평균한 점수">종합 <b>${d.diag.total}</b>점</span>
           </div>
-          ${d.diag.gaps.length ? `<p class="diag-note">💡 지금은 <b>${d.diag.gaps.map(g => AXIS_LABEL[g]).join(', ')}</b>을(를) 채워주는 활동의 추천 점수가 높아요.</p>` : ''}
+          <ul class="bars">${Object.entries(d.diag.axes).map(([k, v]) => {
+            const lv = level(v);
+            return `
+            <li title="${AXIS_HINT[k]} · ${v}점">
+              <span class="bar-label">${AXIS_LABEL[k]}</span>
+              <span class="bar-track"><span class="bar-fill" style="width:${Math.max(v, 2)}%"></span></span>
+              <span class="lv ${lv.c}">${lv.t}</span>
+            </li>`;
+          }).join('')}</ul>
+          <p class="card-foot">영역에 마우스를 올리면 무엇을 기준으로 봤는지 나와요. <a class="link" href="#/me/edit">경험 추가하기</a></p>
         </section>
 
         <section class="card plan-card">
-          <div class="card-head"><h2>🗺️ AI 로드맵</h2>${d.plan ? `<span class="muted small">${ago(d.plan.createdAt)} 설계</span>` : ''}</div>
+          <div class="card-head"><h2>이번 주 할 일</h2>${d.plan ? `<span class="muted small">${ago(d.plan.createdAt)} 로드맵 기준</span>` : ''}</div>
           ${d.plan ? `
-            ${d.plan.stale ? '<p class="stale">프로필이 바뀌었어요. 다시 설계하면 더 정확해져요.</p>' : ''}
-            <p class="plan-summary">${esc(d.plan.summary)}</p>
-            <h3>이번 주 할 일</h3>
-            <ul class="todo">${(d.plan.thisWeek || []).map(t => `<li>${esc(t)}</li>`).join('')}</ul>
-            <a class="btn ghost block" href="#/roadmap">전체 로드맵 보기 →</a>`
+            ${d.plan.stale ? '<p class="stale">프로필이 바뀌었어요. 로드맵을 다시 설계하면 더 정확해져요.</p>' : ''}
+            <ol class="todo">${(d.plan.thisWeek || []).map(t => `<li>${esc(t)}</li>`).join('')}</ol>
+            <a class="btn ghost block" href="#/roadmap">전체 로드맵 보기</a>`
           : `
-            <p class="muted">내 목표와 부족한 스펙을 바탕으로 졸업까지 학기별 활동 계획을 설계해요.</p>
-            <a class="btn primary block" href="#/roadmap">로드맵 설계하기 ✨</a>`}
+            <div class="plan-empty">
+              <p>아직 로드맵이 없어요.<br/>목표와 부족한 스펙을 바탕으로 학기별 계획을 짜드릴게요.</p>
+              <a class="btn primary block" href="#/roadmap">로드맵 설계하기</a>
+            </div>`}
         </section>
       </div>
 
       <section class="section">
-        <div class="section-head"><h2>나에게 딱 맞는 활동</h2><a class="link" href="#/explore">전체 보기 →</a></div>
-        <div class="cards">${d.top.map(contestCard).join('')}</div>
+        <div class="section-head"><h2>나에게 딱 맞는 활동</h2><a class="link" href="#/explore">전체 보기</a></div>
+        <div class="rows-list">${d.top.map(contestRow).join('')}</div>
       </section>
 
       ${d.soon.length ? `
       <section class="section">
-        <div class="section-head"><h2>⏰ 준비 중인 활동 마감</h2><a class="link" href="#/me">활동 관리 →</a></div>
-        <div class="cards">${d.soon.map(contestCard).join('')}</div>
+        <div class="section-head"><h2>준비 중인 활동</h2><a class="link" href="#/me">활동 관리</a></div>
+        <div class="rows-list">${d.soon.map(contestRow).join('')}</div>
       </section>` : ''}
     </div>`;
   bindCards($view);
 }
 
+const ddayPill = c => `<span class="dday ${c.match.daysLeft <= 7 ? 'hot' : ''}">${dday(c.match.daysLeft)}</span>`;
+const sourceBadge = c => c.source === 'sample'
+  ? '<span class="badge sample" title="실제 공고가 아닌 예시 데이터예요">샘플</span>'
+  : c.source === 'ai' ? '<span class="badge ai" title="AI가 웹에서 찾아온 공고예요">AI 수집</span>' : '';
+
+// 홈 화면용 가로 한 줄 카드
+function contestRow(c) {
+  return `
+    <article class="crow" data-go="${c.id}">
+      ${ring(c.match.score, 56)}
+      <div class="crow-main">
+        <div class="crow-top"><span class="badge">${esc(META.CATEGORIES[c.category])}</span>${ddayPill(c)}${sourceBadge(c)}</div>
+        <h3>${esc(c.title)}</h3>
+        <p class="reason">${esc(c.match.reasons[0] || c.summary)}</p>
+      </div>
+      <button class="save ${c.saved ? 'on' : ''}" data-save="${c.id}" aria-label="저장">${c.saved ? '★' : '☆'}</button>
+    </article>`;
+}
+
+// 탐색 화면용 카드: 제목·마감·추천 이유 한 줄만
 function contestCard(c) {
   return `
     <article class="ccard" data-go="${c.id}">
       <div class="ccard-top">
-        ${ring(c.match.score)}
-        <div class="ccard-meta">
-          <span class="badge">${esc(META.CATEGORIES[c.category])}</span>
-          <span class="dday ${c.match.daysLeft <= 3 ? 'hot' : ''}">${dday(c.match.daysLeft)}</span>
-          ${c.source === 'sample' ? '<span class="badge sample" title="실제 공고가 아닌 예시 데이터예요">샘플</span>' : c.source === 'ai' ? '<span class="badge ai" title="AI가 웹에서 찾아온 공고예요">AI 수집</span>' : ''}
-        </div>
+        <div class="crow-top"><span class="badge">${esc(META.CATEGORIES[c.category])}</span>${ddayPill(c)}${sourceBadge(c)}</div>
         <button class="save ${c.saved ? 'on' : ''}" data-save="${c.id}" aria-label="저장">${c.saved ? '★' : '☆'}</button>
       </div>
       <h3>${esc(c.title)}</h3>
-      <p class="host">${esc(c.host)} · ~${fmtDate(c.deadline)}${c.deadlineUnknown ? ' (확인 필요)' : ''}</p>
-      <p class="reason">${c.match.reasons[0] ? `✓ ${esc(c.match.reasons[0])}` : esc(c.summary)}</p>
-      ${c.match.warnings[0] ? `<p class="warn">⚠ ${esc(c.match.warnings[0])}</p>` : ''}
-      <div class="ccard-tags">${c.fields.slice(0, 3).map(f => `<span>#${esc(META.FIELDS[f])}</span>`).join('')}</div>
+      <p class="host">${esc(c.host)} · ${fmtDate(c.deadline)} 마감${c.deadlineUnknown ? ' (확인 필요)' : ''}</p>
+      <div class="ccard-fit">
+        ${ring(c.match.score, 48)}
+        <p>${esc(c.match.reasons[0] || '관심 분야와 조금 거리가 있어요')}</p>
+      </div>
     </article>`;
 }
 
