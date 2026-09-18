@@ -1,0 +1,17 @@
+{
+  "name": "specfit",
+  "version": "0.1.0",
+  "private": true,
+  "description": "스펙핏 — 대학생 맞춤 공모전·대외활동 추천과 AI 스펙 로드맵",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.126.0",
+    "pg": "^8.23.0"
+  }
+}
